@@ -167,16 +167,18 @@ impl LauncherUi {
             _ => tl!("The app will be removed. Your documents and settings stay."),
         };
         ui.label(RichText::new(how).color(t.muted));
-        ui.add_space(20.0);
+        ui.add_space(24.0);
         let mut close = false;
-        // A row: a right-to-left layout straight in the column would fill the height left.
+        // Touch-friendly buttons for mobile and tablet
         ui.horizontal(|ui| {
+            ui.spacing_mut().interact_size.y = 48.0;
+            ui.spacing_mut().item_spacing.x = 16.0;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::button(ui, tl!("Uninstall"), Kind::Danger, 110.0).clicked() {
+                if widgets::button(ui, tl!("Uninstall"), Kind::Danger, 140.0).clicked() {
                     self.send(Command::Uninstall { app: id.to_string() });
                     close = true;
                 }
-                if widgets::button(ui, tl!("Cancel"), Kind::Secondary, 90.0).clicked() {
+                if widgets::button(ui, tl!("Cancel"), Kind::Secondary, 120.0).clicked() {
                     close = true;
                 }
             });
