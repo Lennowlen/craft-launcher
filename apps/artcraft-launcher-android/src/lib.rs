@@ -5,8 +5,7 @@ use artcraft_launcher_core::version;
 use artcraft_launcher_core::{Arch, Os, Platform, SUITE};
 use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings};
 use jni::objects::JValue;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct AndroidHost;
@@ -37,12 +36,12 @@ impl eframe::App for AndroidLauncherApp {
 struct AndroidBackend {
     app: AndroidApp,
     ctx: egui::Context,
-    events: Rc<RefCell<Vec<Event>>>,
+    events: Arc<Mutex<Vec<Event>>>,
 }
 
 impl AndroidBackend {
     fn new(app: AndroidApp, ctx: egui::Context) -> Self {
-        let events = Rc::new(RefCell::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
         Self { app, ctx, events }
     }
 
@@ -82,7 +81,7 @@ impl AndroidBackend {
                 None
             };
 
-            self.events.borrow_mut().push(Event::Detected {
+            self.events.lock().unwrap().push(Event::Detected {
                 app: app.id.into(),
                 installed,
             });
@@ -113,7 +112,7 @@ impl AndroidBackend {
                 }],
             };
 
-            self.events.borrow_mut().push(Event::Latest {
+            self.events.lock().unwrap().push(Event::Latest {
                 app: app.id.into(),
                 latest: LatestRelease::Found(release),
                 from: Origin::GitHub,
@@ -124,7 +123,7 @@ impl AndroidBackend {
         let launcher_installed_v = get_package_version_name(&self.app, "ai.storyteller.craftlauncher")
             .as_deref()
             .and_then(version::parse)
-            .unwrap_or_else(|| version::parse("0.4.2").unwrap());
+            .unwrap_or_else(|| version::parse("0.4.3").unwrap());
         let launcher_latest_v = version::parse("0.4.3").unwrap();
         if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
             let launcher_release = artcraft_launcher_core::release::Release {
@@ -142,10 +141,10 @@ impl AndroidBackend {
                     sha256: None,
                 }],
             };
-            self.events.borrow_mut().push(Event::LauncherUpdate(launcher_release));
+            self.events.lock().unwrap().push(Event::LauncherUpdate(launcher_release));
         }
 
-        self.events.borrow_mut().push(Event::CheckFinished {
+        self.events.lock().unwrap().push(Event::CheckFinished {
             at: now_sec,
             source: Source::Feed,
             rate_limited_until: None,
@@ -157,7 +156,7 @@ impl AndroidBackend {
 
 impl Backend for AndroidBackend {
     fn poll(&mut self) -> Vec<Event> {
-        self.events.borrow_mut().drain(..).collect()
+        self.events.lock().unwrap().drain(..).collect()
     }
 
     fn send(&mut self, command: Command) {
@@ -169,7 +168,13 @@ impl Backend for AndroidBackend {
             }
             Command::Install { app } => {
                 log::info!("Install command requested for: {}", app);
-                install_module(&self.app, &app);
+                let app_clone = self.app.clone();
+                let events = self.events.clone();
+                let ctx = self.ctx.clone();
+                let app_id = app.clone();
+                std::thread::spawn(move || {
+                    download_and_install_module(&app_clone, &app_id, events, ctx);
+                });
             }
             Command::Uninstall { app } => {
                 log::info!("Uninstall command requested for: {}", app);
@@ -178,7 +183,12 @@ impl Backend for AndroidBackend {
             }
             Command::UpdateLauncher => {
                 log::info!("UpdateLauncher command requested");
-                install_module(&self.app, "craft-launcher");
+                let app_clone = self.app.clone();
+                let events = self.events.clone();
+                let ctx = self.ctx.clone();
+                std::thread::spawn(move || {
+                    download_and_install_module(&app_clone, artcraft_launcher_core::catalog::LAUNCHER_ID, events, ctx);
+                });
             }
             Command::Detect | Command::CheckForUpdates { .. } => {
                 log::info!("Re-scanning installed apps...");
@@ -447,23 +457,152 @@ fn uninstall_package(app: &AndroidApp, package_name: &str) {
     }
 }
 
-fn install_module(app: &AndroidApp, app_id: &str) {
+fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex<Vec<Event>>>, ctx: egui::Context) {
+    let apk_filename = match app_id {
+        "artcraft-launcher" | "craft-launcher" => "CraftLauncher.apk",
+        "photocraft" => "PhotoCraft.apk",
+        "cadcraft" => "CADCraft.apk",
+        "vectorcraft" => "VectorCraft.apk",
+        "designcraft" => "DesignCraft.apk",
+        "figcraft" => "FigCraft.apk",
+        "filmcraft" => "FilmCraft.apk",
+        "effectcraft" => "EffectCraft.apk",
+        "lightcraft" => "LightCraft.apk",
+        "pdfcraft" => "PdfCraft.apk",
+        "deckcraft" => "DeckCraft.apk",
+        "gridcraft" => "GridCraft.apk",
+        "wordcraft" => "WordCraft.apk",
+        "soundcraft" => "SoundCraft.apk",
+        _ => "app.apk",
+    };
+
+    let target_path = format!("/sdcard/Download/ArtCraft/{}", apk_filename);
+
+    // If local APK already exists, trigger installer immediately
+    if std::path::Path::new(&target_path).exists() {
+        log::info!("Local APK found at {target_path}, launching installer");
+        events.lock().unwrap().push(Event::Progress {
+            app: app_id.to_string(),
+            phase: artcraft_launcher_core::protocol::JobPhase::Installing,
+        });
+        ctx.request_repaint();
+
+        launch_apk_installer(app, &target_path);
+
+        events.lock().unwrap().push(Event::JobFinished {
+            app: app_id.to_string(),
+            result: Ok("Selesai dipasang".into()),
+        });
+        ctx.request_repaint();
+        return;
+    }
+
+    // Determine download URL
+    let download_url = match app_id {
+        "artcraft-launcher" | "craft-launcher" => {
+            "https://github.com/Lennowlen/craft-launcher/releases/download/v0.4.3-android/CraftLauncher.apk".to_string()
+        }
+        _ => {
+            format!("https://github.com/Lennowlen/{}/releases/latest/download/{}", app_id, apk_filename)
+        }
+    };
+
+    log::info!("Downloading APK from {} to {}", download_url, target_path);
+
+    // Emit downloading starting
+    events.lock().unwrap().push(Event::Progress {
+        app: app_id.to_string(),
+        phase: artcraft_launcher_core::protocol::JobPhase::Downloading { done: 0, total: 20_000_000 },
+    });
+    ctx.request_repaint();
+
+    // Perform download
+    let res = ureq::get(&download_url).call();
+    match res {
+        Ok(mut response) => {
+            let total_len = response
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|l| l.parse::<u64>().ok())
+                .unwrap_or(20_000_000);
+
+            let mut reader = response.body_mut().as_reader();
+            let mut dest = match std::fs::File::create(&target_path) {
+                Ok(f) => f,
+                Err(e) => {
+                    log::error!("Failed to create destination APK file: {e}");
+                    events.lock().unwrap().push(Event::JobFinished {
+                        app: app_id.to_string(),
+                        result: Err(e.to_string()),
+                    });
+                    ctx.request_repaint();
+                    return;
+                }
+            };
+
+            let mut buffer = [0u8; 64 * 1024];
+            let mut downloaded = 0u64;
+            use std::io::{Read, Write};
+
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let _ = dest.write_all(&buffer[..n]);
+                        downloaded += n as u64;
+                        events.lock().unwrap().push(Event::Progress {
+                            app: app_id.to_string(),
+                            phase: artcraft_launcher_core::protocol::JobPhase::Downloading {
+                                done: downloaded,
+                                total: total_len,
+                            },
+                        });
+                        ctx.request_repaint();
+                    }
+                    Err(e) => {
+                        log::error!("Download error: {e}");
+                        events.lock().unwrap().push(Event::JobFinished {
+                            app: app_id.to_string(),
+                            result: Err(e.to_string()),
+                        });
+                        ctx.request_repaint();
+                        return;
+                    }
+                }
+            }
+
+            events.lock().unwrap().push(Event::Progress {
+                app: app_id.to_string(),
+                phase: artcraft_launcher_core::protocol::JobPhase::Installing,
+            });
+            ctx.request_repaint();
+
+            launch_apk_installer(app, &target_path);
+
+            events.lock().unwrap().push(Event::JobFinished {
+                app: app_id.to_string(),
+                result: Ok("Selesai dipasang".into()),
+            });
+            ctx.request_repaint();
+        }
+        Err(e) => {
+            log::error!("HTTP GET failed for {}: {e}", download_url);
+            events.lock().unwrap().push(Event::JobFinished {
+                app: app_id.to_string(),
+                result: Err(format!("Download failed: {e}")),
+            });
+            ctx.request_repaint();
+        }
+    }
+}
+
+fn launch_apk_installer(app: &AndroidApp, apk_path: &str) {
     let vm_ptr = app.vm_as_ptr();
     let activity_ptr = app.activity_as_ptr();
     if vm_ptr.is_null() || activity_ptr.is_null() {
         return;
     }
-
-    // Check if direct APK exists locally in ArtCraft Download workspace
-    let local_apk_name = match app_id {
-        "craft-launcher" => "CraftLauncher.apk",
-        "photocraft" => "PhotoCraft.apk",
-        "cadcraft" => "CADCraft.apk",
-        "vectorcraft" => "VectorCraft.apk",
-        _ => "",
-    };
-    let local_apk_path = format!("/sdcard/Download/ArtCraft/{}", local_apk_name);
-    let has_local_apk = !local_apk_name.is_empty() && std::path::Path::new(&local_apk_path).exists();
 
     unsafe {
         let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
@@ -479,55 +618,12 @@ fn install_module(app: &AndroidApp, app_id: &str) {
             _ => return,
         };
 
-        if has_local_apk {
-            log::info!("Found local APK at {}, invoking Android PackageInstaller...", local_apk_path);
-            let file_uri_str = format!("file://{}", local_apk_path);
-            let uri_jstring = match env.new_string(&file_uri_str) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&uri_jstring)]) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let uri_obj = match uri_val.l() {
-                Ok(u) if !u.as_raw().is_null() => u,
-                _ => return,
-            };
-
-            let action_view = match env.new_string("android.intent.action.VIEW") {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(&action_view)]) {
-                Ok(i) => i,
-                Err(_) => return,
-            };
-
-            let mime_jstring = match env.new_string("application/vnd.android.package-archive") {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            let _ = env.call_method(&intent_obj, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&uri_obj), JValue::Object(&mime_jstring)]);
-            
-            // FLAG_ACTIVITY_NEW_TASK (0x10000000) | FLAG_GRANT_READ_URI_PERMISSION (0x00000001)
-            let flags: i32 = 0x10000000 | 0x00000001;
-            let _ = env.call_method(&intent_obj, "setFlags", "(I)Landroid/content/Intent;", &[JValue::Int(flags)]);
-
-            let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
-            if env.exception_check().unwrap_or(false) {
-                let _ = env.exception_clear();
-            }
-            return;
-        }
-
-        // Open browser to GitHub Releases download page for manual/direct APK installation
-        let url_str = format!("https://github.com/Lennowlen/{}/releases", app_id);
-        let url_jstring = match env.new_string(&url_str) {
+        let file_uri_str = format!("file://{}", apk_path);
+        let uri_jstring = match env.new_string(&file_uri_str) {
             Ok(s) => s,
             Err(_) => return,
         };
-        let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&url_jstring)]) {
+        let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&uri_jstring)]) {
             Ok(v) => v,
             Err(_) => return,
         };
@@ -540,10 +636,19 @@ fn install_module(app: &AndroidApp, app_id: &str) {
             Ok(s) => s,
             Err(_) => return,
         };
-        let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action_view), JValue::Object(&uri_obj)]) {
+        let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(&action_view)]) {
             Ok(i) => i,
             Err(_) => return,
         };
+
+        let mime_jstring = match env.new_string("application/vnd.android.package-archive") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let _ = env.call_method(&intent_obj, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&uri_obj), JValue::Object(&mime_jstring)]);
+
+        let flags: i32 = 0x10000000 | 0x00000001;
+        let _ = env.call_method(&intent_obj, "setFlags", "(I)Landroid/content/Intent;", &[JValue::Int(flags)]);
 
         let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
         if env.exception_check().unwrap_or(false) {

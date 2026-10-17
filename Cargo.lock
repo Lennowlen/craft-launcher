@@ -328,6 +328,7 @@ dependencies = [
  "egui",
  "jni 0.21.1",
  "log",
+ "ureq",
 ]
 
 [[package]]
