@@ -124,8 +124,12 @@ impl Backend for AndroidBackend {
             }
             Command::Install { app } => {
                 log::info!("Install command requested for: {}", app);
+                install_module(&self.app, &app);
+            }
+            Command::Uninstall { app } => {
+                log::info!("Uninstall command requested for: {}", app);
                 let pkg = format!("ai.storyteller.{}", app);
-                launch_package(&self.app, &pkg);
+                uninstall_package(&self.app, &pkg);
             }
             Command::Detect | Command::CheckForUpdates { .. } => {
                 log::info!("Re-scanning installed apps...");
@@ -197,7 +201,6 @@ fn is_package_installed(app: &AndroidApp, package_name: &str) -> bool {
             Err(_) => return false,
         };
 
-        // First try: getLaunchIntentForPackage(package_name) != null
         if let Ok(intent_val) = env.call_method(&pm, "getLaunchIntentForPackage", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&pkg_jstring)]) {
             if let Ok(intent_obj) = intent_val.l() {
                 if !intent_obj.as_raw().is_null() {
@@ -210,7 +213,6 @@ fn is_package_installed(app: &AndroidApp, package_name: &str) -> bool {
             let _ = env.exception_clear();
         }
 
-        // Second try: getPackageInfo(package_name, 0)
         let res = env.call_method(&pm, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;", &[JValue::Object(&pkg_jstring), JValue::Int(0)]);
         if env.exception_check().unwrap_or(false) {
             let _ = env.exception_clear();
@@ -244,7 +246,6 @@ fn launch_package(app: &AndroidApp, package_name: &str) {
             _ => return,
         };
 
-        // Context.getPackageManager()
         let pm_val = match env.call_method(&activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]) {
             Ok(val) => val,
             Err(_) => return,
@@ -259,7 +260,6 @@ fn launch_package(app: &AndroidApp, package_name: &str) {
             Err(_) => return,
         };
 
-        // PackageManager.getLaunchIntentForPackage(String) -> Intent
         let intent_val = match env.call_method(&pm, "getLaunchIntentForPackage", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&pkg_jstring)]) {
             Ok(val) => val,
             Err(_) => return,
@@ -272,8 +272,110 @@ fn launch_package(app: &AndroidApp, package_name: &str) {
             }
         };
 
-        // Activity.startActivity(Intent)
         let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)]);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+    }
+}
+
+fn uninstall_package(app: &AndroidApp, package_name: &str) {
+    let vm_ptr = app.vm_as_ptr();
+    let activity_ptr = app.activity_as_ptr();
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        return;
+    }
+
+    unsafe {
+        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+            Ok(jvm) => jvm,
+            Err(_) => return,
+        };
+        let mut env = match jvm.attach_current_thread() {
+            Ok(env) => env,
+            Err(_) => return,
+        };
+        let activity = match jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject) {
+            activity if !activity.as_raw().is_null() => activity,
+            _ => return,
+        };
+
+        let uri_str = format!("package:{}", package_name);
+        let uri_jstring = match env.new_string(&uri_str) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&uri_jstring)]) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let uri_obj = match uri_val.l() {
+            Ok(u) if !u.as_raw().is_null() => u,
+            _ => return,
+        };
+
+        let action_delete = match env.new_string("android.intent.action.DELETE") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action_delete), JValue::Object(&uri_obj)]) {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+
+        let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+    }
+}
+
+fn install_module(app: &AndroidApp, app_id: &str) {
+    let vm_ptr = app.vm_as_ptr();
+    let activity_ptr = app.activity_as_ptr();
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        return;
+    }
+
+    unsafe {
+        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+            Ok(jvm) => jvm,
+            Err(_) => return,
+        };
+        let mut env = match jvm.attach_current_thread() {
+            Ok(env) => env,
+            Err(_) => return,
+        };
+        let activity = match jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject) {
+            activity if !activity.as_raw().is_null() => activity,
+            _ => return,
+        };
+
+        // Open browser to GitHub Releases download page for manual/direct APK installation
+        let url_str = format!("https://github.com/Lennowlen/{}/releases", app_id);
+        let url_jstring = match env.new_string(&url_str) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&url_jstring)]) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let uri_obj = match uri_val.l() {
+            Ok(u) if !u.as_raw().is_null() => u,
+            _ => return,
+        };
+
+        let action_view = match env.new_string("android.intent.action.VIEW") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", &[JValue::Object(&action_view), JValue::Object(&uri_obj)]) {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+
+        let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
         if env.exception_check().unwrap_or(false) {
             let _ = env.exception_clear();
         }
