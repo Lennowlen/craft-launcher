@@ -1,0 +1,27 @@
+﻿[package]
+name = "artcraft-launcher-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+artcraft-launcher-core = { workspace = true }
+artcraft-launcher-ui-egui = { workspace = true }
+eframe = { workspace = true, default-features = false, features = ["wgpu", "android-native-activity"] }
+egui = { workspace = true }
+android-activity = { version = "0.6", features = ["native-activity"] }
+log = { workspace = true }
+android_logger = "0.14"
+
+[package.metadata.android]
+package = "ai.storyteller.craftlauncher"
+apk_name = "CraftLauncher"
+app_name = "Craft Launcher"
+label = "Craft Launcher"
+target_sdk_version = 34
+min_sdk_version = 26
+build_targets = ["aarch64-linux-android"]
