@@ -35,36 +35,42 @@ impl eframe::App for AndroidLauncherApp {
 }
 
 struct AndroidBackend {
+    app: AndroidApp,
+    ctx: egui::Context,
     events: Rc<RefCell<Vec<Event>>>,
 }
 
 impl AndroidBackend {
-    fn new(ctx: egui::Context) -> Self {
+    fn new(app: AndroidApp, ctx: egui::Context) -> Self {
         let events = Rc::new(RefCell::new(Vec::new()));
-        let backend = Self { events: events.clone() };
+        let mut backend = Self { app, ctx, events: events.clone() };
+        backend.rescan();
+        backend
+    }
 
+    fn rescan(&mut self) {
         let now_sec = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
 
         for app in SUITE {
-            let is_installed = app.id == "photocraft";
+            let pkg = format!("ai.storyteller.{}", app.id);
+            let is_installed = is_package_installed(&self.app, &pkg);
+
             let installed = if is_installed {
                 Some(Installed {
                     version: version::parse("0.9.2"),
                     source: InstallSource::Launcher,
-                    location: "/data/app/ai.storyteller.photocraft".into(),
-                    package: Some("ai.storyteller.photocraft".into()),
+                    location: format!("/data/app/{}", pkg),
+                    package: Some(pkg.clone()),
                 })
             } else {
                 None
             };
 
-            // 1. Laporkan status deteksi modul
-            events.borrow_mut().push(Event::Detected {
+            self.events.borrow_mut().push(Event::Detected {
                 app: app.id.into(),
                 installed,
             });
 
-            // 2. Berikan metadata rilis agar status berubah dari "Checking..." menjadi "Up to date" atau "Coming soon"
             let v_str = if is_installed { "0.9.2" } else { "0.1.0" };
             let release = artcraft_launcher_core::release::Release {
                 tag: format!("v{v_str}-android"),
@@ -84,23 +90,20 @@ impl AndroidBackend {
                 ],
             };
 
-            events.borrow_mut().push(Event::Latest {
+            self.events.borrow_mut().push(Event::Latest {
                 app: app.id.into(),
                 latest: LatestRelease::Found(release),
                 from: Origin::GitHub,
             });
         }
 
-        // Tuntaskan status check updates global
-        events.borrow_mut().push(Event::CheckFinished {
+        self.events.borrow_mut().push(Event::CheckFinished {
             at: now_sec,
             source: Source::Feed,
             rate_limited_until: None,
         });
 
-        ctx.request_repaint();
-
-        backend
+        self.ctx.request_repaint();
     }
 }
 
@@ -109,7 +112,20 @@ impl Backend for AndroidBackend {
         self.events.borrow_mut().drain(..).collect()
     }
 
-    fn send(&mut self, _command: Command) {}
+    fn send(&mut self, command: Command) {
+        match command {
+            Command::Launch { app } => {
+                let pkg = format!("ai.storyteller.{}", app);
+                log::info!("Launching package: {}", pkg);
+                launch_package(&self.app, &pkg);
+            }
+            Command::Detect | Command::CheckForUpdates { .. } => {
+                log::info!("Re-scanning installed apps...");
+                self.rescan();
+            }
+            _ => {}
+        }
+    }
 
     fn capabilities(&self) -> Capabilities {
         Capabilities {
@@ -125,6 +141,110 @@ impl Backend for AndroidBackend {
 
     fn now(&self) -> i64 {
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    }
+}
+
+fn is_package_installed(app: &AndroidApp, package_name: &str) -> bool {
+    let vm_ptr = app.vm_as_ptr();
+    let activity_ptr = app.activity_as_ptr();
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        return false;
+    }
+
+    unsafe {
+        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+            Ok(jvm) => jvm,
+            Err(_) => return false,
+        };
+        let mut env = match jvm.attach_current_thread() {
+            Ok(env) => env,
+            Err(_) => return false,
+        };
+        let activity = match jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject) {
+            activity if !activity.as_raw().is_null() => activity,
+            _ => return false,
+        };
+
+        // Context.getPackageManager()
+        let pm_val = match env.call_method(&activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]) {
+            Ok(val) => val,
+            Err(_) => return false,
+        };
+        let pm = match pm_val.l() {
+            Ok(pm) if !pm.as_raw().is_null() => pm,
+            _ => return false,
+        };
+
+        // PackageManager.getPackageInfo(String, int)
+        let pkg_jstring = match env.new_string(package_name) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let res = env.call_method(&pm, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;", &[JValue::Object(&pkg_jstring), JValue::Int(0)]);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+            return false;
+        }
+
+        res.is_ok()
+    }
+}
+
+fn launch_package(app: &AndroidApp, package_name: &str) {
+    let vm_ptr = app.vm_as_ptr();
+    let activity_ptr = app.activity_as_ptr();
+    if vm_ptr.is_null() || activity_ptr.is_null() {
+        return;
+    }
+
+    unsafe {
+        let jvm = match jni::JavaVM::from_raw(vm_ptr as *mut jni::sys::JavaVM) {
+            Ok(jvm) => jvm,
+            Err(_) => return,
+        };
+        let mut env = match jvm.attach_current_thread() {
+            Ok(env) => env,
+            Err(_) => return,
+        };
+        let activity = match jni::objects::JObject::from_raw(activity_ptr as jni::sys::jobject) {
+            activity if !activity.as_raw().is_null() => activity,
+            _ => return,
+        };
+
+        // Context.getPackageManager()
+        let pm_val = match env.call_method(&activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]) {
+            Ok(val) => val,
+            Err(_) => return,
+        };
+        let pm = match pm_val.l() {
+            Ok(pm) if !pm.as_raw().is_null() => pm,
+            _ => return,
+        };
+
+        let pkg_jstring = match env.new_string(package_name) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // PackageManager.getLaunchIntentForPackage(String) -> Intent
+        let intent_val = match env.call_method(&pm, "getLaunchIntentForPackage", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&pkg_jstring)]) {
+            Ok(val) => val,
+            Err(_) => return,
+        };
+        let intent = match intent_val.l() {
+            Ok(i) if !i.as_raw().is_null() => i,
+            _ => {
+                log::warn!("Could not get launch intent for package {}", package_name);
+                return;
+            }
+        };
+
+        // Activity.startActivity(Intent)
+        let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent)]);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
     }
 }
 
@@ -153,12 +273,6 @@ fn apply_immersive_sticky(app: &AndroidApp) {
             if let Ok(window_obj) = window.l() {
                 if let Ok(decor_view) = env.call_method(&window_obj, "getDecorView", "()Landroid/view/View;", &[]) {
                     if let Ok(decor_obj) = decor_view.l() {
-                        // SYSTEM_UI_FLAG_IMMERSIVE_STICKY (4096)
-                        // | SYSTEM_UI_FLAG_FULLSCREEN (4)
-                        // | SYSTEM_UI_FLAG_HIDE_NAVIGATION (2)
-                        // | SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN (1024)
-                        // | SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION (512)
-                        // | SYSTEM_UI_FLAG_LAYOUT_STABLE (256)
                         let flags: i32 = 4096 | 4 | 2 | 1024 | 512 | 256;
                         let _ = env.call_method(&decor_obj, "setSystemUiVisibility", "(I)V", &[JValue::Int(flags)]);
                     }
@@ -180,15 +294,16 @@ fn android_main(app: AndroidApp) {
 
     apply_immersive_sticky(&app);
 
+    let cloned_app = app.clone();
     let mut options = eframe::NativeOptions::default();
     options.android_app = Some(app);
 
     let _ = eframe::run_native(
         "Craft Launcher",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();
-            let backend = AndroidBackend::new(ctx.clone());
+            let backend = AndroidBackend::new(cloned_app, ctx.clone());
             let settings = Settings::default();
             let ui = LauncherUi::new(&ctx, Box::new(backend), settings);
             Ok(Box::new(AndroidLauncherApp { ui }))
