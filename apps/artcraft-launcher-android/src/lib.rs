@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use android_activity::AndroidApp;
 use artcraft_launcher_core::protocol::{Backend, Capabilities, Command, Event, LatestRelease, Origin, Source};
 use artcraft_launcher_core::status::{InstallSource, Installed};
@@ -8,6 +5,9 @@ use artcraft_launcher_core::version;
 use artcraft_launcher_core::{Arch, Os, Platform, SUITE};
 use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings};
 use jni::objects::JValue;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 struct AndroidHost;
 impl Host for AndroidHost {
@@ -25,13 +25,7 @@ impl eframe::App for AndroidLauncherApp {
         self.ui.logic(ctx, &mut AndroidHost);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.ui.ui(ui, &mut AndroidHost);
-    }
-
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.ui.raw_input(ctx, raw_input);
-    }
+    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
 }
 
 struct AndroidBackend {
@@ -43,17 +37,19 @@ struct AndroidBackend {
 impl AndroidBackend {
     fn new(app: AndroidApp, ctx: egui::Context) -> Self {
         let events = Rc::new(RefCell::new(Vec::new()));
-        let mut backend = Self { app, ctx, events: events.clone() };
-        backend.rescan();
-        backend
+        Self { app, ctx, events }
     }
 
     fn rescan(&mut self) {
-        let now_sec = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let now_sec = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
 
         for app in SUITE {
             let pkg = format!("ai.storyteller.{}", app.id);
             let is_installed = is_package_installed(&self.app, &pkg);
+            log::info!("Check package {}: installed={}", pkg, is_installed);
 
             let installed = if is_installed {
                 Some(Installed {
@@ -80,14 +76,15 @@ impl AndroidBackend {
                 html_url: format!("https://github.com/Lennowlen/{}/releases", app.id),
                 notes: "Android ARM64 native release for Huawei MatePad 12X".into(),
                 prerelease: false,
-                assets: vec![
-                    artcraft_launcher_core::release::Asset {
-                        name: format!("{}-{}-linux-aarch64.AppImage", app.id, v_str),
-                        size: 45_000_000,
-                        url: format!("https://github.com/Lennowlen/{}/releases/download/v{}-android/{}.apk", app.id, v_str, app.id),
-                        sha256: None,
-                    }
-                ],
+                assets: vec![artcraft_launcher_core::release::Asset {
+                    name: format!("{}-{}-linux-aarch64.AppImage", app.id, v_str),
+                    size: 45_000_000,
+                    url: format!(
+                        "https://github.com/Lennowlen/{}/releases/download/v{}-android/{}.apk",
+                        app.id, v_str, app.id
+                    ),
+                    sha256: None,
+                }],
             };
 
             self.events.borrow_mut().push(Event::Latest {
@@ -119,6 +116,11 @@ impl Backend for AndroidBackend {
                 log::info!("Launching package: {}", pkg);
                 launch_package(&self.app, &pkg);
             }
+            Command::Install { app } => {
+                log::info!("Install command requested for: {}", app);
+                let pkg = format!("ai.storyteller.{}", app);
+                launch_package(&self.app, &pkg);
+            }
             Command::Detect | Command::CheckForUpdates { .. } => {
                 log::info!("Re-scanning installed apps...");
                 self.rescan();
@@ -136,11 +138,17 @@ impl Backend for AndroidBackend {
     }
 
     fn platform(&self) -> Option<Platform> {
-        Some(Platform { os: Os::Linux, arch: Arch::Arm64 })
+        Some(Platform {
+            os: Os::Linux,
+            arch: Arch::Arm64,
+        })
     }
 
     fn now(&self) -> i64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
     }
 }
 
@@ -168,26 +176,44 @@ fn is_package_installed(app: &AndroidApp, package_name: &str) -> bool {
         // Context.getPackageManager()
         let pm_val = match env.call_method(&activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]) {
             Ok(val) => val,
-            Err(_) => return false,
+            Err(e) => {
+                log::warn!("getPackageManager failed: {:?}", e);
+                return false;
+            }
         };
         let pm = match pm_val.l() {
             Ok(pm) if !pm.as_raw().is_null() => pm,
             _ => return false,
         };
 
-        // PackageManager.getPackageInfo(String, int)
         let pkg_jstring = match env.new_string(package_name) {
             Ok(s) => s,
             Err(_) => return false,
         };
 
+        // First try: getLaunchIntentForPackage(package_name) != null
+        if let Ok(intent_val) = env.call_method(&pm, "getLaunchIntentForPackage", "(Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&pkg_jstring)]) {
+            if let Ok(intent_obj) = intent_val.l() {
+                if !intent_obj.as_raw().is_null() {
+                    log::info!("Package {} found via getLaunchIntentForPackage", package_name);
+                    return true;
+                }
+            }
+        }
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+
+        // Second try: getPackageInfo(package_name, 0)
         let res = env.call_method(&pm, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;", &[JValue::Object(&pkg_jstring), JValue::Int(0)]);
         if env.exception_check().unwrap_or(false) {
             let _ = env.exception_clear();
             return false;
         }
 
-        res.is_ok()
+        let is_ok = res.is_ok();
+        log::info!("Package {} getPackageInfo result: {}", package_name, is_ok);
+        is_ok
     }
 }
 
@@ -290,11 +316,11 @@ fn android_main(app: AndroidApp) {
             .with_tag("CraftLauncher"),
     );
 
-    log::info!("Starting Craft Launcher on Huawei MatePad 12X (Android ARM64)...");
+    log::info!("artcraft_launcher_android: Starting Craft Launcher on Huawei MatePad 12X (Android ARM64)...");
 
     apply_immersive_sticky(&app);
 
-    let cloned_app = app.clone();
+    let app_clone = app.clone();
     let mut options = eframe::NativeOptions::default();
     options.android_app = Some(app);
 
@@ -302,10 +328,10 @@ fn android_main(app: AndroidApp) {
         "Craft Launcher",
         options,
         Box::new(move |cc| {
-            let ctx = cc.egui_ctx.clone();
-            let backend = AndroidBackend::new(cloned_app, ctx.clone());
-            let settings = Settings::default();
-            let ui = LauncherUi::new(&ctx, Box::new(backend), settings);
+            let mut backend = AndroidBackend::new(app_clone, cc.egui_ctx.clone());
+            backend.rescan();
+
+            let ui = LauncherUi::new(&cc.egui_ctx, Box::new(backend), Settings::default());
             Ok(Box::new(AndroidLauncherApp { ui }))
         }),
     );
