@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "artcraft-launcher-android"
 version.workspace = true
 edition.workspace = true
@@ -16,6 +16,7 @@ egui = { workspace = true }
 android-activity = { version = "0.6", features = ["native-activity"] }
 log = { workspace = true }
 android_logger = "0.14"
+jni = "0.21"
 
 [package.metadata.android]
 package = "ai.storyteller.craftlauncher"
