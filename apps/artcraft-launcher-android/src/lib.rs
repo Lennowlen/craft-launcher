@@ -25,7 +25,13 @@ impl eframe::App for AndroidLauncherApp {
         self.ui.logic(ctx, &mut AndroidHost);
     }
 
-    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.ui.ui(ui, &mut AndroidHost);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.ui.raw_input(ctx, raw_input);
+    }
 }
 
 struct AndroidBackend {
