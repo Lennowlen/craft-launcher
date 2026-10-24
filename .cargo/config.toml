@@ -1,5 +1,10 @@
 [alias]
 xtask = "run -p xtask --"
 
+[env]
+CC_aarch64_linux_android = "C:/Users/ThinkPad/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android34-clang.cmd"
+AR_aarch64_linux_android = "C:/Users/ThinkPad/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+
 [target.aarch64-linux-android]
 linker = "C:/Users/ThinkPad/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android34-clang.cmd"
+ar = "C:/Users/ThinkPad/AppData/Local/Android/Sdk/ndk/27.1.12297006/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"

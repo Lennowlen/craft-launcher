@@ -18,6 +18,7 @@ pub fn app(id: &str) -> Option<ImageSource<'static>> {
         "cadcraft" => egui::include_image!("../../../assets/app-icons/cadcraft.png"),
         "soundcraft" => egui::include_image!("../../../assets/app-icons/soundcraft.png"),
         "figcraft" => egui::include_image!("../../../assets/app-icons/figcraft.png"),
+        "codecraft" => egui::include_image!("../../../assets/app-icons/codecraft.png"),
         _ => return None,
     })
 }
