@@ -44,3 +44,6 @@ inherits = "release"
 opt-level = "s"
 lto = "fat"
 strip = "debuginfo"
+
+[patch.crates-io]
+winit = { path = "../winit-patched" }

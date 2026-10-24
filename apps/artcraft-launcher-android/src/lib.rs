@@ -127,7 +127,7 @@ impl AndroidBackend {
         let launcher_latest_v = version::parse("0.4.3").unwrap();
         if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
             let launcher_release = artcraft_launcher_core::release::Release {
-                tag: "v0.4.3-android".into(),
+                tag: "latest".into(),
                 version: Some(launcher_latest_v),
                 name: "Craft Launcher v0.4.3".into(),
                 published_at: Some(now_sec),
@@ -136,8 +136,8 @@ impl AndroidBackend {
                 prerelease: false,
                 assets: vec![artcraft_launcher_core::release::Asset {
                     name: "CraftLauncher.apk".into(),
-                    size: 7_500_000,
-                    url: "https://github.com/Lennowlen/craft-launcher/releases/download/v0.4.3-android/CraftLauncher.apk".into(),
+                    size: 8_200_000,
+                    url: "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk".into(),
                     sha256: None,
                 }],
             };
@@ -154,6 +154,11 @@ impl AndroidBackend {
     }
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static CANCEL_DOWNLOAD: AtomicBool = AtomicBool::new(false);
+static PAUSE_DOWNLOAD: AtomicBool = AtomicBool::new(false);
+
 impl Backend for AndroidBackend {
     fn poll(&mut self) -> Vec<Event> {
         self.events.lock().unwrap().drain(..).collect()
@@ -168,6 +173,8 @@ impl Backend for AndroidBackend {
             }
             Command::Install { app } => {
                 log::info!("Install command requested for: {}", app);
+                CANCEL_DOWNLOAD.store(false, Ordering::SeqCst);
+                PAUSE_DOWNLOAD.store(false, Ordering::SeqCst);
                 let app_clone = self.app.clone();
                 let events = self.events.clone();
                 let ctx = self.ctx.clone();
@@ -176,6 +183,14 @@ impl Backend for AndroidBackend {
                     download_and_install_module(&app_clone, &app_id, events, ctx);
                 });
             }
+            Command::Pause { app } => {
+                log::info!("Pause command requested for: {}", app);
+                PAUSE_DOWNLOAD.store(true, Ordering::SeqCst);
+            }
+            Command::Cancel { app } => {
+                log::info!("Cancel command requested for: {}", app);
+                CANCEL_DOWNLOAD.store(true, Ordering::SeqCst);
+            }
             Command::Uninstall { app } => {
                 log::info!("Uninstall command requested for: {}", app);
                 let pkg = format!("ai.storyteller.{}", app);
@@ -183,6 +198,8 @@ impl Backend for AndroidBackend {
             }
             Command::UpdateLauncher => {
                 log::info!("UpdateLauncher command requested");
+                CANCEL_DOWNLOAD.store(false, Ordering::SeqCst);
+                PAUSE_DOWNLOAD.store(false, Ordering::SeqCst);
                 let app_clone = self.app.clone();
                 let events = self.events.clone();
                 let ctx = self.ctx.clone();
@@ -407,6 +424,7 @@ fn launch_package(app: &AndroidApp, package_name: &str) {
 }
 
 fn uninstall_package(app: &AndroidApp, package_name: &str) {
+    log::info!("uninstall_package: requesting uninstall for {}", package_name);
     let vm_ptr = app.vm_as_ptr();
     let activity_ptr = app.activity_as_ptr();
     if vm_ptr.is_null() || activity_ptr.is_null() {
@@ -450,6 +468,9 @@ fn uninstall_package(app: &AndroidApp, package_name: &str) {
             Err(_) => return,
         };
 
+        let flags: i32 = 0x10000000; // FLAG_ACTIVITY_NEW_TASK
+        let _ = env.call_method(&intent_obj, "setFlags", "(I)Landroid/content/Intent;", &[JValue::Int(flags)]);
+
         let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
         if env.exception_check().unwrap_or(false) {
             let _ = env.exception_clear();
@@ -473,6 +494,7 @@ fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex
         "gridcraft" => "GridCraft.apk",
         "wordcraft" => "WordCraft.apk",
         "soundcraft" => "SoundCraft.apk",
+        "codecraft" => "CodeCraft.apk",
         _ => "app.apk",
     };
 
@@ -500,7 +522,7 @@ fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex
     // Determine download URL
     let download_url = match app_id {
         "artcraft-launcher" | "craft-launcher" => {
-            "https://github.com/Lennowlen/craft-launcher/releases/download/v0.4.3-android/CraftLauncher.apk".to_string()
+            "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk".to_string()
         }
         _ => {
             format!("https://github.com/Lennowlen/{}/releases/latest/download/{}", app_id, apk_filename)
@@ -517,7 +539,14 @@ fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex
     ctx.request_repaint();
 
     // Perform download
-    let res = ureq::get(&download_url).call();
+    let agent: ureq::Agent = ureq::config::Config::builder()
+        .max_redirects(10)
+        .build()
+        .into();
+
+    let res = agent.get(&download_url)
+        .header("User-Agent", "CraftLauncher-Android/0.4.3")
+        .call();
     match res {
         Ok(mut response) => {
             let total_len = response
@@ -546,6 +575,34 @@ fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex
             use std::io::{Read, Write};
 
             loop {
+                if CANCEL_DOWNLOAD.load(Ordering::SeqCst) {
+                    log::info!("Download cancelled by user for {app_id}");
+                    let _ = std::fs::remove_file(&target_path);
+                    events.lock().unwrap().push(Event::JobFinished {
+                        app: app_id.to_string(),
+                        result: Err(artcraft_launcher_core::protocol::CANCELLED.to_string()),
+                    });
+                    ctx.request_repaint();
+                    return;
+                }
+
+                if PAUSE_DOWNLOAD.load(Ordering::SeqCst) {
+                    log::info!("Download paused by user for {app_id}");
+                    events.lock().unwrap().push(Event::Paused {
+                        app: app_id.to_string(),
+                        download: Some(artcraft_launcher_core::protocol::PausedDownload {
+                            done: downloaded,
+                            total: total_len,
+                        }),
+                    });
+                    events.lock().unwrap().push(Event::JobFinished {
+                        app: app_id.to_string(),
+                        result: Err(artcraft_launcher_core::protocol::PAUSED.to_string()),
+                    });
+                    ctx.request_repaint();
+                    return;
+                }
+
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -618,41 +675,174 @@ fn launch_apk_installer(app: &AndroidApp, apk_path: &str) {
             _ => return,
         };
 
-        let file_uri_str = format!("file://{}", apk_path);
-        let uri_jstring = match env.new_string(&file_uri_str) {
-            Ok(s) => s,
-            Err(_) => return,
+        log::info!("launch_apk_installer: preparing PackageInstaller session for APK: {}", apk_path);
+
+        // Get PackageManager: activity.getPackageManager()
+        let pm_val = match env.call_method(&activity, "getPackageManager", "()Landroid/content/pm/PackageManager;", &[]) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to get PackageManager: {:?}", e);
+                return;
+            }
         };
-        let uri_val = match env.call_static_method("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[JValue::Object(&uri_jstring)]) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let uri_obj = match uri_val.l() {
-            Ok(u) if !u.as_raw().is_null() => u,
+        let pm = match pm_val.l() {
+            Ok(p) if !p.as_raw().is_null() => p,
             _ => return,
         };
 
-        let action_view = match env.new_string("android.intent.action.VIEW") {
+        // Get PackageInstaller: pm.getPackageInstaller()
+        let pi_val = match env.call_method(&pm, "getPackageInstaller", "()Landroid/content/pm/PackageInstaller;", &[]) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to get PackageInstaller: {:?}", e);
+                return;
+            }
+        };
+        let pi = match pi_val.l() {
+            Ok(p) if !p.as_raw().is_null() => p,
+            _ => return,
+        };
+
+        // Create SessionParams: new PackageInstaller.SessionParams(MODE_FULL_INSTALL = 1)
+        let params_obj = match env.new_object("android/content/pm/PackageInstaller$SessionParams", "(I)V", &[JValue::Int(1)]) {
+            Ok(obj) => obj,
+            Err(e) => {
+                log::error!("Failed to create SessionParams: {:?}", e);
+                return;
+            }
+        };
+
+        // Create session: int sessionId = pi.createSession(params)
+        let session_id_val = match env.call_method(&pi, "createSession", "(Landroid/content/pm/PackageInstaller$SessionParams;)I", &[JValue::Object(&params_obj)]) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to create install session: {:?}", e);
+                return;
+            }
+        };
+        let session_id = match session_id_val.i() {
+            Ok(id) => id,
+            Err(_) => return,
+        };
+
+        log::info!("launch_apk_installer: created install session {}", session_id);
+
+        // Open session: PackageInstaller.Session session = pi.openSession(sessionId)
+        let session_val = match env.call_method(&pi, "openSession", "(I)Landroid/content/pm/PackageInstaller$Session;", &[JValue::Int(session_id)]) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to open install session: {:?}", e);
+                return;
+            }
+        };
+        let session = match session_val.l() {
+            Ok(s) if !s.as_raw().is_null() => s,
+            _ => return,
+        };
+
+        // Stream APK bytes into session.openWrite("base.apk", 0, apk_size)
+        let apk_bytes = match std::fs::read(apk_path) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Failed to read APK file for streaming: {:?}", e);
+                return;
+            }
+        };
+        let apk_size = apk_bytes.len() as i64;
+        let entry_name = match env.new_string("base.apk") {
             Ok(s) => s,
             Err(_) => return,
         };
-        let intent_obj = match env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(&action_view)]) {
+
+        let out_stream_val = match env.call_method(
+            &session,
+            "openWrite",
+            "(Ljava/lang/String;JJ)Ljava/io/OutputStream;",
+            &[JValue::Object(&entry_name), JValue::Long(0), JValue::Long(apk_size)],
+        ) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to open session OutputStream: {:?}", e);
+                return;
+            }
+        };
+        let out_stream = match out_stream_val.l() {
+            Ok(s) if !s.as_raw().is_null() => s,
+            _ => return,
+        };
+
+        // Write in chunks via byte[]
+        let chunk_size = 64 * 1024;
+        for chunk in apk_bytes.chunks(chunk_size) {
+            let byte_array = match env.byte_array_from_slice(chunk) {
+                Ok(arr) => arr,
+                Err(e) => {
+                    log::error!("Failed to create chunk byte array: {:?}", e);
+                    return;
+                }
+            };
+            let _ = env.call_method(&out_stream, "write", "([B)V", &[JValue::Object(&byte_array)]);
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_clear();
+                log::error!("Exception writing APK chunk to session OutputStream");
+                return;
+            }
+        }
+
+        let _ = env.call_method(&session, "fsync", "(Ljava/io/OutputStream;)V", &[JValue::Object(&out_stream)]);
+        let _ = env.call_method(&out_stream, "close", "()V", &[]);
+
+        // Create PendingIntent for commit status callback:
+        // Intent commitIntent = new Intent("ai.storyteller.craftlauncher.INSTALL_COMPLETE");
+        let action_commit = match env.new_string("ai.storyteller.craftlauncher.INSTALL_COMPLETE") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let commit_intent = match env.new_object("android/content/Intent", "(Ljava/lang/String;)V", &[JValue::Object(&action_commit)]) {
             Ok(i) => i,
             Err(_) => return,
         };
 
-        let mime_jstring = match env.new_string("application/vnd.android.package-archive") {
-            Ok(s) => s,
-            Err(_) => return,
+        // PendingIntent piSender = PendingIntent.getBroadcast(activity, sessionId, commitIntent, FLAG_MUTABLE = 0x02000000 | FLAG_UPDATE_CURRENT = 0x08000000)
+        let pi_flags: i32 = 0x02000000 | 0x08000000;
+        let pending_intent_val = match env.call_static_method(
+            "android/app/PendingIntent",
+            "getBroadcast",
+            "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;",
+            &[JValue::Object(&activity), JValue::Int(session_id), JValue::Object(&commit_intent), JValue::Int(pi_flags)],
+        ) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to create PendingIntent: {:?}", e);
+                return;
+            }
         };
-        let _ = env.call_method(&intent_obj, "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", &[JValue::Object(&uri_obj), JValue::Object(&mime_jstring)]);
+        let pending_intent = match pending_intent_val.l() {
+            Ok(p) if !p.as_raw().is_null() => p,
+            _ => return,
+        };
 
-        let flags: i32 = 0x10000000 | 0x00000001;
-        let _ = env.call_method(&intent_obj, "setFlags", "(I)Landroid/content/Intent;", &[JValue::Int(flags)]);
+        let status_receiver = match env.call_method(&pending_intent, "getIntentSender", "()Landroid/content/IntentSender;", &[]) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("Failed to get IntentSender: {:?}", e);
+                return;
+            }
+        };
+        let status_receiver_obj = match status_receiver.l() {
+            Ok(s) if !s.as_raw().is_null() => s,
+            _ => return,
+        };
 
-        let _ = env.call_method(&activity, "startActivity", "(Landroid/content/Intent;)V", &[JValue::Object(&intent_obj)]);
+        // session.commit(statusReceiver)
+        let _ = env.call_method(&session, "commit", "(Landroid/content/IntentSender;)V", &[JValue::Object(&status_receiver_obj)]);
+        let _ = env.call_method(&session, "close", "()V", &[]);
+
         if env.exception_check().unwrap_or(false) {
             let _ = env.exception_clear();
+            log::error!("Exception committing install session");
+        } else {
+            log::info!("launch_apk_installer: install session committed successfully!");
         }
     }
 }

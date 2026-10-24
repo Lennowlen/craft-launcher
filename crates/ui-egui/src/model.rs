@@ -39,6 +39,9 @@ impl AppEntry {
     /// Whether the latest release has something for `platform`.
     pub fn has_download(&self, platform: Option<Platform>) -> bool {
         let (Some(r), Some(p)) = (self.release(), platform) else { return false };
+        if r.assets.iter().any(|a| a.name.ends_with(".apk")) {
+            return true;
+        }
         let stems: Vec<&str> = self.app.stems().collect();
         pick_asset(r, &stems, p, p.download_kinds()).is_some()
     }

@@ -94,8 +94,8 @@ const fn app(
     CraftApp { id, name, tagline, group, color, ink_light, ink_dark, repo, former_ids: &[], former_names: &[] }
 }
 
-/// The Craft App Suite, in display order: the seven classic apps, then the six new ones.
-pub const SUITE: [CraftApp; 13] = [
+/// The Craft App Suite, in display order: the seven classic apps, then the seven new ones.
+pub const SUITE: [CraftApp; 14] = [
     app(
         "photocraft",
         "PhotoCraft",
@@ -204,6 +204,14 @@ pub const SUITE: [CraftApp; 13] = [
         [[0x02, 0xda, 0x96], [0x04, 0x7a, 0x56], [0x4f, 0xe8, 0xb6]],
         "storytold/figcraft",
     ),
+    app(
+        "codecraft",
+        "CodeCraft",
+        "Code editing and developer tooling",
+        AppGroup::New,
+        [[0x10, 0xb9, 0x81], [0x04, 0x78, 0x57], [0x34, 0xd3, 0x99]],
+        "storytold/codecraft",
+    ),
 ];
 
 /// ArtCraft's website.
@@ -249,7 +257,7 @@ mod tests {
     #[test]
     fn suite_has_seven_classic_and_six_new_apps_with_unique_ids() {
         assert_eq!(SUITE.iter().filter(|a| a.group == AppGroup::Classic).count(), 7);
-        assert_eq!(SUITE.iter().filter(|a| a.group == AppGroup::New).count(), 6);
+        assert_eq!(SUITE.iter().filter(|a| a.group == AppGroup::New).count(), 7);
         let mut ids: Vec<_> = SUITE.iter().map(|a| a.id).collect();
         ids.sort_unstable();
         ids.dedup();
