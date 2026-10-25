@@ -217,7 +217,15 @@ impl LauncherUi {
                 filters.into_iter().map(|(f, label, tip, highlight)| (f, Cell { label, tip, count: Some((self.count(f), highlight)) })).collect();
             widgets::cells(ui, &mut self.settings.filter, &filters);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.caps.manage_apps && updates > 0 {
+                if let Some(_r) = &self.launcher_update {
+                    if widgets::button(ui, tl!("Update Launcher"), Kind::Primary, 0.0)
+                        .on_hover_text(tl!("Downloads the new launcher version and updates this app"))
+                        .clicked()
+                    {
+                        self.send(Command::UpdateLauncher);
+                    }
+                    ui.add_space(4.0);
+                } else if self.caps.manage_apps && updates > 0 {
                     let label = if updates == 1 {
                         tl!("Update 1 app").to_string()
                     } else {

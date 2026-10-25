@@ -86,11 +86,17 @@ impl AndroidBackend {
                 installed,
             });
 
-            // Dual version mapping: default fork release version vs installed version
+            // Dual version mapping: release version matching GitHub Releases
             let latest_v_str = match app.id {
-                "photocraft" => "0.9.3", // Menawarkan update jika installed masih 0.9.2
+                "photocraft" => "0.9.2",
                 "cadcraft" => "0.7.0",
                 "vectorcraft" => "0.12.0",
+                "figcraft" => "0.6.0",
+                "wordcraft" => "0.7.0",
+                "codecraft" => "0.1.0",
+                "designcraft" | "filmcraft" | "effectcraft" => "0.8.0",
+                "lightcraft" | "pdfcraft" => "0.9.0",
+                "deckcraft" | "gridcraft" | "soundcraft" => "0.7.0",
                 _ => "0.1.0",
             };
             let release = artcraft_launcher_core::release::Release {
@@ -498,7 +504,13 @@ fn download_and_install_module(app: &AndroidApp, app_id: &str, events: Arc<Mutex
         _ => "app.apk",
     };
 
-    let target_path = format!("/sdcard/Download/ArtCraft/{}", apk_filename);
+    let target_dir = app.external_data_path()
+        .or_else(|| app.internal_data_path())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "/sdcard/Download/ArtCraft".to_string());
+
+    let _ = std::fs::create_dir_all(&target_dir);
+    let target_path = format!("{}/{}", target_dir, apk_filename);
 
     // Determine download URL
     let download_url = match app_id {
