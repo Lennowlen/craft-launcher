@@ -1,4 +1,62 @@
 use android_activity::AndroidApp;
+use serde::Deserialize;
+use std::collections::HashMap;
+
+const CLOUD_CATALOG_URL: &str = "https://raw.githubusercontent.com/Lennowlen/craft-launcher/main/catalog-android.json";
+
+#[derive(Clone, Debug, Deserialize)]
+struct CloudModule {
+    version: String,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    apk_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CloudLauncher {
+    version: String,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    apk_url: Option<String>,
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CloudCatalog {
+    #[serde(default)]
+    launcher: Option<CloudLauncher>,
+    #[serde(default)]
+    modules: HashMap<String, CloudModule>,
+}
+
+fn fetch_cloud_catalog() -> Option<CloudCatalog> {
+    let agent: ureq::Agent = ureq::config::Config::builder()
+        .max_redirects(5)
+        .build()
+        .into();
+
+    let res = agent.get(CLOUD_CATALOG_URL)
+        .header("User-Agent", "CraftLauncher-Android/0.4.9")
+        .call();
+
+    match res {
+        Ok(mut response) => {
+            let mut body_str = String::new();
+            if std::io::Read::read_to_string(&mut response.body_mut().as_reader(), &mut body_str).is_ok() {
+                serde_json::from_str::<CloudCatalog>(&body_str).ok()
+            } else {
+                None
+            }
+        }
+        Err(e) => {
+            log::warn!("Could not fetch cloud catalog: {e}");
+            None
+        }
+    }
+}
 use artcraft_launcher_core::protocol::{Backend, Capabilities, Command, Event, LatestRelease, Origin, Source};
 use artcraft_launcher_core::status::{InstallSource, Installed};
 use artcraft_launcher_core::version;
@@ -51,6 +109,8 @@ impl AndroidBackend {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
+        let cloud_catalog = fetch_cloud_catalog();
+
         for app in SUITE {
             let pkg = format!("ai.storyteller.{}", app.id);
             let is_installed = is_package_installed(&self.app, &pkg);
@@ -86,22 +146,38 @@ impl AndroidBackend {
                 installed,
             });
 
-            // Dual version mapping: release version matching GitHub Releases
-            let latest_v_str = match app.id {
-                "photocraft" => "0.9.2",
-                "cadcraft" => "0.7.0",
-                "vectorcraft" => "0.12.0",
-                "figcraft" => "0.6.0",
-                "wordcraft" => "0.7.0",
-                "codecraft" => "0.4.0",
-                "designcraft" | "filmcraft" | "effectcraft" => "0.8.0",
-                "lightcraft" | "pdfcraft" => "0.9.0",
-                "deckcraft" | "gridcraft" | "soundcraft" => "0.7.0",
-                _ => "0.1.0",
+            // Dynamic version from Cloud Catalog or Fallback
+            let cloud_mod = cloud_catalog.as_ref().and_then(|c| c.modules.get(app.id));
+
+            let (latest_v_str, tag_str, apk_url_str) = if let Some(m) = cloud_mod {
+                let tag = m.tag.clone().unwrap_or_else(|| format!("v{}-android", m.version));
+                let url = m.apk_url.clone().unwrap_or_else(|| {
+                    format!("https://github.com/Lennowlen/{}/releases/download/{}/{}.apk", app.id, tag, app.id)
+                });
+                (m.version.clone(), tag, url)
+            } else {
+                let fallback_v = match app.id {
+                    "photocraft" => "0.9.2",
+                    "cadcraft" => "0.7.0",
+                    "vectorcraft" => "0.12.0",
+                    "figcraft" => "0.6.0",
+                    "wordcraft" => "0.7.0",
+                    "codecraft" => "0.4.0",
+                    "designcraft" | "filmcraft" | "effectcraft" => "0.8.0",
+                    "lightcraft" | "pdfcraft" => "0.9.0",
+                    "deckcraft" | "gridcraft" | "soundcraft" => "0.7.0",
+                    _ => "0.1.0",
+                };
+                (
+                    fallback_v.to_string(),
+                    format!("v{fallback_v}-android"),
+                    format!("https://github.com/Lennowlen/{}/releases/download/v{fallback_v}-android/{}.apk", app.id, app.id),
+                )
             };
+
             let release = artcraft_launcher_core::release::Release {
-                tag: format!("v{latest_v_str}-android"),
-                version: version::parse(latest_v_str),
+                tag: tag_str,
+                version: version::parse(&latest_v_str),
                 name: format!("{} v{} (Mobile Port)", app.name, latest_v_str),
                 published_at: Some(now_sec),
                 html_url: format!("https://github.com/Lennowlen/{}/releases", app.id),
@@ -110,10 +186,7 @@ impl AndroidBackend {
                 assets: vec![artcraft_launcher_core::release::Asset {
                     name: format!("{}-{}.apk", app.id, latest_v_str),
                     size: 45_000_000,
-                    url: format!(
-                        "https://github.com/Lennowlen/{}/releases/download/v{}-android/{}.apk",
-                        app.id, latest_v_str, app.id
-                    ),
+                    url: apk_url_str,
                     sha256: None,
                 }],
             };
@@ -125,31 +198,50 @@ impl AndroidBackend {
             });
         }
 
-        // Self-update launcher check
+        // Self-update launcher check (Dynamic from Cloud Catalog or Fallback)
         let launcher_installed_v = get_package_version_name(&self.app, "ai.storyteller.craftlauncher")
             .as_deref()
             .and_then(version::parse)
             .or_else(|| version::parse(env!("CARGO_PKG_VERSION")))
-            .unwrap_or_else(|| version::parse("0.4.5").unwrap());
+            .unwrap_or_else(|| version::parse("0.4.8").unwrap());
         log::info!("Launcher version: detected={:?}, compile_env={}", launcher_installed_v, env!("CARGO_PKG_VERSION"));
-        let launcher_latest_v = version::parse("0.4.8").unwrap();
-        if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
-            let launcher_release = artcraft_launcher_core::release::Release {
-                tag: "v0.4.8-android".into(),
-                version: Some(launcher_latest_v),
-                name: "Craft Launcher v0.4.8".into(),
-                published_at: Some(now_sec),
-                html_url: "https://github.com/Lennowlen/craft-launcher/releases".into(),
-                notes: "Pembaruan Craft Launcher ARM64: Update katalog modul CodeCraft v0.4.0 (1:1 Lapce UI & Engine Parity).".into(),
-                prerelease: false,
-                assets: vec![artcraft_launcher_core::release::Asset {
-                    name: "CraftLauncher.apk".into(),
-                    size: 8_300_000,
-                    url: "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk".into(),
-                    sha256: None,
-                }],
-            };
-            self.events.lock().unwrap().push(Event::LauncherUpdate(launcher_release));
+
+        let cloud_launcher = cloud_catalog.as_ref().and_then(|c| c.launcher.as_ref());
+        let (launcher_latest_v_str, l_tag_str, l_apk_url_str, l_notes) = if let Some(cl) = cloud_launcher {
+            (
+                cl.version.clone(),
+                cl.tag.clone().unwrap_or_else(|| format!("v{}-android", cl.version)),
+                cl.apk_url.clone().unwrap_or_else(|| "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk".to_string()),
+                cl.notes.clone().unwrap_or_else(|| "Pembaruan Craft Launcher ARM64.".to_string()),
+            )
+        } else {
+            (
+                "0.4.9".to_string(),
+                "v0.4.9-android".to_string(),
+                "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk".to_string(),
+                "Pembaruan Craft Launcher ARM64: Dynamic cloud module catalog update via raw.githubusercontent.com feed.".to_string(),
+            )
+        };
+
+        if let Some(launcher_latest_v) = version::parse(&launcher_latest_v_str) {
+            if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
+                let launcher_release = artcraft_launcher_core::release::Release {
+                    tag: l_tag_str,
+                    version: Some(launcher_latest_v),
+                    name: format!("Craft Launcher v{}", launcher_latest_v_str),
+                    published_at: Some(now_sec),
+                    html_url: "https://github.com/Lennowlen/craft-launcher/releases".into(),
+                    notes: l_notes,
+                    prerelease: false,
+                    assets: vec![artcraft_launcher_core::release::Asset {
+                        name: "CraftLauncher.apk".into(),
+                        size: 8_300_000,
+                        url: l_apk_url_str,
+                        sha256: None,
+                    }],
+                };
+                self.events.lock().unwrap().push(Event::LauncherUpdate(launcher_release));
+            }
         }
 
         self.events.lock().unwrap().push(Event::CheckFinished {

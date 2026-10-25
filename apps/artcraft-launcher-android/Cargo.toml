@@ -17,6 +17,8 @@ android-activity = { version = "0.6", features = ["native-activity"] }
 log = { workspace = true }
 android_logger = "0.14"
 jni = "0.21"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls", "gzip"] }
 
 [package.metadata.android]

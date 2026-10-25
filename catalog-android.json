@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "updated_at": 1729860000,
+  "launcher": {
+    "version": "0.4.9",
+    "tag": "v0.4.9-android",
+    "apk_url": "https://github.com/Lennowlen/craft-launcher/releases/latest/download/CraftLauncher.apk",
+    "notes": "Craft Launcher Android ARM64: Dynamic cloud module catalog update via raw.githubusercontent.com feed."
+  },
+  "modules": {
+    "codecraft": {
+      "version": "0.4.0",
+      "tag": "v0.4.0-android",
+      "name": "CodeCraft",
+      "apk_name": "CodeCraft.apk",
+      "repo": "Lennowlen/codecraft",
+      "apk_url": "https://github.com/Lennowlen/codecraft/releases/download/v0.4.0-android/CodeCraft.apk"
+    },
+    "photocraft": {
+      "version": "0.9.2",
+      "tag": "v0.9.2-android",
+      "name": "PhotoCraft",
+      "apk_name": "PhotoCraft.apk",
+      "repo": "Lennowlen/photocraft",
+      "apk_url": "https://github.com/Lennowlen/photocraft/releases/download/v0.9.2-android/PhotoCraft.apk"
+    },
+    "cadcraft": {
+      "version": "0.7.0",
+      "tag": "v0.7.0-android",
+      "name": "CADCraft",
+      "apk_name": "CADCraft.apk",
+      "repo": "Lennowlen/cadcraft",
+      "apk_url": "https://github.com/Lennowlen/cadcraft/releases/download/v0.7.0-android/CADCraft.apk"
+    },
+    "vectorcraft": {
+      "version": "0.12.0",
+      "tag": "v0.12.0-android",
+      "name": "VectorCraft",
+      "apk_name": "VectorCraft.apk",
+      "repo": "Lennowlen/vectorcraft",
+      "apk_url": "https://github.com/Lennowlen/vectorcraft/releases/download/v0.12.0-android/VectorCraft.apk"
+    },
+    "figcraft": {
+      "version": "0.6.0",
+      "tag": "v0.6.0-android",
+      "name": "FigCraft",
+      "apk_name": "FigCraft.apk",
+      "repo": "Lennowlen/figcraft",
+      "apk_url": "https://github.com/Lennowlen/figcraft/releases/download/v0.6.0-android/FigCraft.apk"
+    },
+    "wordcraft": {
+      "version": "0.7.0",
+      "tag": "v0.7.0-android",
+      "name": "WordCraft",
+      "apk_name": "WordCraft.apk",
+      "repo": "Lennowlen/wordcraft",
+      "apk_url": "https://github.com/Lennowlen/wordcraft/releases/download/v0.7.0-android/WordCraft.apk"
+    },
+    "designcraft": {
+      "version": "0.8.0",
+      "tag": "v0.8.0-android",
+      "name": "DesignCraft",
+      "apk_name": "DesignCraft.apk",
+      "repo": "Lennowlen/designcraft",
+      "apk_url": "https://github.com/Lennowlen/designcraft/releases/download/v0.8.0-android/DesignCraft.apk"
+    },
+    "filmcraft": {
+      "version": "0.8.0",
+      "tag": "v0.8.0-android",
+      "name": "FilmCraft",
+      "apk_name": "FilmCraft.apk",
+      "repo": "Lennowlen/filmcraft",
+      "apk_url": "https://github.com/Lennowlen/filmcraft/releases/download/v0.8.0-android/FilmCraft.apk"
+    },
+    "effectcraft": {
+      "version": "0.8.0",
+      "tag": "v0.8.0-android",
+      "name": "EffectCraft",
+      "apk_name": "EffectCraft.apk",
+      "repo": "Lennowlen/effectcraft",
+      "apk_url": "https://github.com/Lennowlen/effectcraft/releases/download/v0.8.0-android/EffectCraft.apk"
+    },
+    "lightcraft": {
+      "version": "0.9.0",
+      "tag": "v0.9.0-android",
+      "name": "LightCraft",
+      "apk_name": "LightCraft.apk",
+      "repo": "Lennowlen/lightcraft",
+      "apk_url": "https://github.com/Lennowlen/lightcraft/releases/download/v0.9.0-android/LightCraft.apk"
+    },
+    "pdfcraft": {
+      "version": "0.9.0",
+      "tag": "v0.9.0-android",
+      "name": "PdfCraft",
+      "apk_name": "PdfCraft.apk",
+      "repo": "Lennowlen/pdfcraft",
+      "apk_url": "https://github.com/Lennowlen/pdfcraft/releases/download/v0.9.0-android/PdfCraft.apk"
+    },
+    "deckcraft": {
+      "version": "0.7.0",
+      "tag": "v0.7.0-android",
+      "name": "DeckCraft",
+      "apk_name": "DeckCraft.apk",
+      "repo": "Lennowlen/deckcraft",
+      "apk_url": "https://github.com/Lennowlen/deckcraft/releases/download/v0.7.0-android/DeckCraft.apk"
+    },
+    "gridcraft": {
+      "version": "0.7.0",
+      "tag": "v0.7.0-android",
+      "name": "GridCraft",
+      "apk_name": "GridCraft.apk",
+      "repo": "Lennowlen/gridcraft",
+      "apk_url": "https://github.com/Lennowlen/gridcraft/releases/download/v0.7.0-android/GridCraft.apk"
+    },
+    "soundcraft": {
+      "version": "0.7.0",
+      "tag": "v0.7.0-android",
+      "name": "SoundCraft",
+      "apk_name": "SoundCraft.apk",
+      "repo": "Lennowlen/soundcraft",
+      "apk_url": "https://github.com/Lennowlen/soundcraft/releases/download/v0.7.0-android/SoundCraft.apk"
+    }
+  }
+}
