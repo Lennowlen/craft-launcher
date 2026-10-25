@@ -93,7 +93,7 @@ impl AndroidBackend {
                 "vectorcraft" => "0.12.0",
                 "figcraft" => "0.6.0",
                 "wordcraft" => "0.7.0",
-                "codecraft" => "0.2.0",
+                "codecraft" => "0.3.0",
                 "designcraft" | "filmcraft" | "effectcraft" => "0.8.0",
                 "lightcraft" | "pdfcraft" => "0.9.0",
                 "deckcraft" | "gridcraft" | "soundcraft" => "0.7.0",
