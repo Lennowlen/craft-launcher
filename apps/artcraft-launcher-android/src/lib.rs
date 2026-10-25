@@ -93,7 +93,7 @@ impl AndroidBackend {
                 "vectorcraft" => "0.12.0",
                 "figcraft" => "0.6.0",
                 "wordcraft" => "0.7.0",
-                "codecraft" => "0.3.0",
+                "codecraft" => "0.3.1",
                 "designcraft" | "filmcraft" | "effectcraft" => "0.8.0",
                 "lightcraft" | "pdfcraft" => "0.9.0",
                 "deckcraft" | "gridcraft" | "soundcraft" => "0.7.0",
@@ -132,15 +132,15 @@ impl AndroidBackend {
             .or_else(|| version::parse(env!("CARGO_PKG_VERSION")))
             .unwrap_or_else(|| version::parse("0.4.5").unwrap());
         log::info!("Launcher version: detected={:?}, compile_env={}", launcher_installed_v, env!("CARGO_PKG_VERSION"));
-        let launcher_latest_v = version::parse("0.4.6").unwrap();
+        let launcher_latest_v = version::parse("0.4.7").unwrap();
         if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
             let launcher_release = artcraft_launcher_core::release::Release {
-                tag: "v0.4.6-android".into(),
+                tag: "v0.4.7-android".into(),
                 version: Some(launcher_latest_v),
-                name: "Craft Launcher v0.4.6".into(),
+                name: "Craft Launcher v0.4.7".into(),
                 published_at: Some(now_sec),
                 html_url: "https://github.com/Lennowlen/craft-launcher/releases".into(),
-                notes: "Pembaruan Craft Launcher ARM64: Update katalog modul CodeCraft v0.3.0 (Pure Lapce Native IDE Edition).".into(),
+                notes: "Pembaruan Craft Launcher ARM64: Update katalog modul CodeCraft v0.3.1 (Official Lapce-Core Engine).".into(),
                 prerelease: false,
                 assets: vec![artcraft_launcher_core::release::Asset {
                     name: "CraftLauncher.apk".into(),
