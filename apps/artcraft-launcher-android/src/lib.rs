@@ -663,14 +663,43 @@ fn launch_apk_installer(app: &AndroidApp, apk_path: &str) {
             Err(_) => return,
         };
 
-        // Call InstallHelper.installApk(activity, apkPath)
-        let helper_class = match env.find_class("ai/storyteller/craftlauncher/InstallHelper") {
-            Ok(c) => c,
+        // Load InstallHelper via activity.getClassLoader() so it resolves on any attached thread
+        let class_loader = match env.call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[]) {
+            Ok(cl_val) => match cl_val.l() {
+                Ok(cl) if !cl.as_raw().is_null() => cl,
+                _ => return,
+            },
             Err(e) => {
-                log::error!("Failed to find InstallHelper class: {:?}", e);
+                log::error!("Failed to get ClassLoader from Activity: {:?}", e);
                 return;
             }
         };
+
+        let helper_name = match env.new_string("ai.storyteller.craftlauncher.InstallHelper") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let helper_class_obj = match env.call_method(
+            &class_loader,
+            "loadClass",
+            "(Ljava/lang/String;)Ljava/lang/Class;",
+            &[JValue::Object(&helper_name)],
+        ) {
+            Ok(cls_val) => match cls_val.l() {
+                Ok(cls) if !cls.as_raw().is_null() => cls,
+                _ => return,
+            },
+            Err(e) => {
+                log::error!("Failed to load InstallHelper class via ClassLoader: {:?}", e);
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_clear();
+                }
+                return;
+            }
+        };
+
+        let helper_class = jni::objects::JClass::from(helper_class_obj);
 
         let res = env.call_static_method(
             &helper_class,
