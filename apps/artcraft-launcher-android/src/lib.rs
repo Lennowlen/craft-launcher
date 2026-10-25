@@ -129,7 +129,9 @@ impl AndroidBackend {
         let launcher_installed_v = get_package_version_name(&self.app, "ai.storyteller.craftlauncher")
             .as_deref()
             .and_then(version::parse)
-            .unwrap_or_else(|| version::parse("0.4.1").unwrap());
+            .or_else(|| version::parse(env!("CARGO_PKG_VERSION")))
+            .unwrap_or_else(|| version::parse("0.4.5").unwrap());
+        log::info!("Launcher version: detected={:?}, compile_env={}", launcher_installed_v, env!("CARGO_PKG_VERSION"));
         let launcher_latest_v = version::parse("0.4.5").unwrap();
         if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
             let launcher_release = artcraft_launcher_core::release::Release {

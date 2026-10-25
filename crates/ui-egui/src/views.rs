@@ -199,6 +199,40 @@ impl LauncherUi {
                 });
             ui.add_space(14.0);
         }
+        // Update notification banner for individual modules
+        let updates_count = self.count(Filter::Updates);
+        if updates_count > 0 && self.launcher_update.is_none() {
+            egui::Frame::new()
+                .fill(tint(t.warn, if t.dark { 0.12 } else { 0.08 }))
+                .stroke(Stroke::new(1.0, tint(t.warn, 0.7)))
+                .inner_margin(egui::Margin::symmetric(16, 10))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        widgets::tag(ui, tl!("Updates"), t.warn, Color32::BLACK);
+                        ui.add_space(4.0);
+                        let names: Vec<&str> = self.entries.iter()
+                            .filter(|e| self.in_filter(e, Filter::Updates))
+                            .map(|e| e.app.name)
+                            .collect();
+                        let update_msg = if names.len() == 1 {
+                            format!("Pembaruan tersedia untuk {}.", names[0])
+                        } else {
+                            format!("Pembaruan tersedia untuk {} modul ({}).", names.len(), names.join(", "))
+                        };
+                        ui.label(RichText::new(update_msg).family(theme::medium()).color(t.ink_strong));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if self.settings.filter != Filter::Updates {
+                                if widgets::button(ui, "Lihat Pembaruan", Kind::Secondary, 0.0).clicked() {
+                                    self.settings.filter = Filter::Updates;
+                                }
+                            }
+                        });
+                    });
+                });
+            ui.add_space(10.0);
+        }
+
         self.announcements(ui);
         ui.horizontal(|ui| {
             let updates = self.count(Filter::Updates);
