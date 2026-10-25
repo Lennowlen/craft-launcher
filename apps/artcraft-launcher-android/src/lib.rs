@@ -130,15 +130,15 @@ impl AndroidBackend {
             .as_deref()
             .and_then(version::parse)
             .unwrap_or_else(|| version::parse("0.4.1").unwrap());
-        let launcher_latest_v = version::parse("0.4.4").unwrap();
+        let launcher_latest_v = version::parse("0.4.5").unwrap();
         if version::is_newer(&launcher_latest_v, &launcher_installed_v) {
             let launcher_release = artcraft_launcher_core::release::Release {
-                tag: "v0.4.4-android".into(),
+                tag: "v0.4.5-android".into(),
                 version: Some(launcher_latest_v),
-                name: "Craft Launcher v0.4.4".into(),
+                name: "Craft Launcher v0.4.5".into(),
                 published_at: Some(now_sec),
                 html_url: "https://github.com/Lennowlen/craft-launcher/releases".into(),
-                notes: "Pembaruan Craft Launcher ARM64: Memperbaiki installer APK Android, icon CodeCraft, dan izin install.".into(),
+                notes: "Pembaruan Craft Launcher ARM64: Update katalog modul CodeCraft v0.2.0 (Sublime + Lapce IDE).".into(),
                 prerelease: false,
                 assets: vec![artcraft_launcher_core::release::Asset {
                     name: "CraftLauncher.apk".into(),
